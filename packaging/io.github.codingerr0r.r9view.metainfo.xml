@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.codingerr0r.r9view</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>r9view</name>
+  <summary>Touch-first image and comic viewer</summary>
+  <description>
+    <p>
+      r9view opens a comic archive the way a normal viewer opens a picture: point it
+      at a zip, cbz, rar, cbr or 7z and it reads the images inside, in page order,
+      without unpacking anything first. It works just as well on an ordinary folder
+      of images.
+    </p>
+    <p>
+      It is built for a touchscreen: swipe to turn the page, pinch to zoom, drag to
+      pan, double tap to zoom in on a panel. Everything is on the keyboard too --
+      arrow keys page and zoom.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.codingerr0r.r9view.desktop</launchable>
+  <url type="homepage">https://github.com/Coding-Err0r/r9view</url>
+  <url type="bugtracker">https://github.com/Coding-Err0r/r9view/issues</url>
+  <provides><binary>r9view</binary></provides>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-09-05"/>
+  </releases>
+</component>

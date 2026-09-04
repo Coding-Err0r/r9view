@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=r9view
+GenericName=Image and Comic Viewer
+Comment=Read comics straight out of a zip, or browse a folder of images
+Exec=r9view %f
+Icon=io.github.codingerr0r.r9view
+Terminal=false
+Categories=Graphics;Viewer;2DGraphics;RasterGraphics;
+Keywords=image;photo;viewer;comic;manga;cbz;cbr;zip;
+MimeType=image/png;image/jpeg;image/gif;image/webp;image/avif;image/heif;image/heic;image/jxl;image/tiff;image/bmp;image/svg+xml;image/x-portable-pixmap;image/vnd.adobe.photoshop;application/zip;application/vnd.comicbook+zip;application/vnd.comicbook-rar;application/x-cbz;application/x-cbr;application/x-7z-compressed;application/vnd.rar;application/x-tar;
+StartupNotify=true
+StartupWMClass=r9view

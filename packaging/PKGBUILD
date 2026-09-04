@@ -1,0 +1,26 @@
+# Maintainer: Rhineul Islam <r9xcode@gmail.com>
+pkgname=r9view
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Touch-first image and comic viewer that reads straight out of zip/cbz/cbr archives"
+arch=('x86_64' 'aarch64')
+url="https://github.com/Coding-Err0r/r9view"
+license=('GPL-3.0-or-later')
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'libarchive' 'hicolor-icon-theme')
+optdepends=('qt6-imageformats: WebP, TIFF and JPEG 2000 support'
+            'kimageformats: AVIF, HEIF, JPEG-XL, PSD and RAW support')
+makedepends=('cmake' 'ninja' 'git')
+source=("git+$url.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+build() {
+    cmake -S "$pkgname" -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "$pkgname/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
