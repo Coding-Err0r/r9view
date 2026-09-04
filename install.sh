@@ -8,11 +8,21 @@
 #
 #   PREFIX=~/.local  ...   install for just you, no root needed
 #   PREFIX=/usr/local ...  system-wide (default; uses sudo for the install step)
+#   SKIP_DEPS=1      ...   do not touch the package manager; you manage the
+#                          dependencies yourself (also what CI wants)
 set -euo pipefail
 
 REPO_URL="https://github.com/Coding-Err0r/r9view.git"
 PREFIX="${PREFIX:-/usr/local}"
 BRANCH="${BRANCH:-main}"
+
+# Where a temporary clone goes, if we make one. Global rather than a local in
+# main(), because the EXIT trap runs after main()'s locals are gone -- and under
+# `set -u` a trap referring to a vanished local kills the script with a confusing
+# "unbound variable" instead of cleaning up.
+WORKDIR=""
+cleanup() { [ -n "${WORKDIR:-}" ] && rm -rf "$WORKDIR"; }
+trap cleanup EXIT
 
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 info() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
@@ -31,6 +41,16 @@ esac
 
 # ---------------------------------------------------------------- packages ---
 install_deps() {
+    if [ -n "${SKIP_DEPS:-}" ]; then
+        info "SKIP_DEPS set -- leaving the package manager alone"
+        return 0
+    fi
+    if ! sudo -v 2>/dev/null; then
+        die "cannot get root to install dependencies.
+       Run the installer from a terminal where sudo can ask for your password,
+       or install the dependencies yourself and re-run with SKIP_DEPS=1."
+    fi
+
     local id=""
     [ -r /etc/os-release ] && id=$(. /etc/os-release && echo "${ID_LIKE:-$ID}")
 
@@ -90,13 +110,12 @@ main() {
         src=$(cd "$(dirname "$0")" && pwd)
         info "building from $src"
     else
-        src=$(mktemp -d)
-        trap 'rm -rf "$src"' EXIT
-        info "fetching r9view"
-        git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$src/r9view" >/dev/null 2>&1 \
-            || die "could not clone $REPO_URL"
-        src="$src/r9view"
         install_deps
+        WORKDIR=$(mktemp -d)
+        info "fetching r9view"
+        git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$WORKDIR/r9view" >/dev/null 2>&1 \
+            || die "could not clone $REPO_URL"
+        src="$WORKDIR/r9view"
     fi
 
     info "compiling (this takes a minute)"
