@@ -16,9 +16,14 @@ OUT="${1:-fixtures}"
 rm -rf "$OUT"
 mkdir -p "$OUT/season/Subs/01" "$OUT/season/Subs/02" "$OUT/season/Fonts" "$OUT/comic"
 
+# Resolve OUT to an absolute path up front. Joining it onto $PWD later only
+# works while it is relative, and silently produces nonsense the moment someone
+# passes /tmp/fixtures.
+OUT="$(cd "$OUT" && pwd)"
+
 # ffmpeg on Windows needs a native path, and the MSYS2 shell hands it a POSIX one.
 native() { if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi; }
-NOUT="$(native "$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")")"
+NOUT="$(native "$OUT")"
 
 srt() {
     printf '1\n00:00:01,000 --> 00:00:04,000\n%s \xe2\x80\x94 line one\n\n2\n00:00:05,000 --> 00:00:09,000\n%s \xe2\x80\x94 line two\n' "$1" "$1" > "$2"
@@ -33,7 +38,7 @@ for n in 01 02; do
         -f lavfi -i "testsrc=size=320x240:rate=24:duration=10" \
         -f lavfi -i "sine=frequency=440:duration=10" \
         -f lavfi -i "sine=frequency=880:duration=10" \
-        -i "$(native "$PWD/$OUT/embedded.srt")" \
+        -i "$(native "$OUT/embedded.srt")" \
         -map 0:v -map 1:a -map 2:a -map 3:s \
         -c:v libx264 -preset ultrafast -c:a aac -c:s ass \
         -metadata:s:a:0 language=jpn -metadata:s:a:0 title="Japanese 2.0" \
