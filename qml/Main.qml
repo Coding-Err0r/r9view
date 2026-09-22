@@ -150,11 +150,19 @@ ApplicationWindow {
     }
 
     // The sheet's state lives out here so the Loader can come and go with the
-    // video without losing it.
+    // video without losing it. That also means it has to be put back when the
+    // video goes away: left standing, it keeps overlayOpen true forever, the
+    // bars never auto-hide again, and the next Escape is swallowed closing a
+    // sheet nobody can see.
     QtObject {
         id: videoSheet
         property bool showing: false
         property string section: "tracks"
+    }
+
+    Connections {
+        target: Book
+        function onKindChanged() { videoSheet.showing = false; }
     }
 
     HelpSheet {
@@ -241,7 +249,11 @@ ApplicationWindow {
         }
 
         function onPausedChanged() {
-            if (Player.paused)
+            // Only once there is a real position to keep. keep-open flips the
+            // pause flag around every file change, and a pause seen while the
+            // position is still zero would read as "barely watched" and throw
+            // away the resume point for the episode just starting.
+            if (Player.paused && Player.duration > 0 && Player.position > 1)
                 Book.rememberMediaTime(Player.position, Player.duration);
         }
     }

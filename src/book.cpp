@@ -20,6 +20,12 @@ QString bookmarkKey(const QString &path)
     return u"bookmarks/"_s + QString::fromLatin1(h.toHex().left(16));
 }
 
+QString playlistKey(const QString &path)
+{
+    const QByteArray h = QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha1);
+    return u"playlist/"_s + QString::fromLatin1(h.toHex().left(16));
+}
+
 // Playback position of one episode. Deliberately a different prefix from
 // bookmarks/: a page number and a timestamp are not the same thing, and mixing
 // them would make old settings files mean something new.
@@ -195,7 +201,7 @@ void Book::adopt(const Opened &result)
     int start = result.start;
     if (start == 0) {
         QSettings s;
-        start = s.value(bookmarkKey(path), 0).toInt();
+        start = s.value(m_media ? playlistKey(path) : bookmarkKey(path), 0).toInt();
     }
     m_index = qBound(0, start, m_count - 1);
 
@@ -348,11 +354,16 @@ void Book::rememberPosition() const
     if (m_location.isEmpty() || m_count <= 0)
         return;
     QSettings s;
+    // A page number and an episode number are not the same thing, and the same
+    // folder can be read both ways -- a comic folder with a trailer dropped in
+    // it opens as a one-entry playlist. Keeping them under separate prefixes
+    // stops episode 0 of that playlist from erasing the page you were on.
+    const QString key = m_media ? playlistKey(m_location) : bookmarkKey(m_location);
     // Finishing a book should not reopen it on the last page forever.
     if (m_index >= m_count - 1)
-        s.remove(bookmarkKey(m_location));
+        s.remove(key);
     else
-        s.setValue(bookmarkKey(m_location), m_index);
+        s.setValue(key, m_index);
 }
 
 void Book::pushRecent(const QString &path)

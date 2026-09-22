@@ -230,15 +230,12 @@ QString languageOf(const QString &relativePath, QString *display)
 
 // --------------------------------------------------------------- matching ----
 
-QVector<SubtitleRef> Playlist::matchSubtitles(const QString &video,
-                                              const QStringList &scope,
-                                              int videoCount,
-                                              const QString &urlPrefix)
+// Everything about one candidate subtitle that does not depend on which video
+// it is being compared against. Working it out once per file instead of once
+// per (video, file) pair is what keeps a thirteen-episode folder from running
+// the episode-number regex a few hundred times over.
+QVector<Playlist::Candidate> Playlist::candidates(const QStringList &scope)
 {
-    const QString videoDir = dirOf(video);
-    const QString videoStem = stemOf(lastComponent(video));
-    const int videoEpisode = episodeNumber(video);
-
     // A VobSub pair is one subtitle, addressed by its .idx. Loading the .sub
     // beside it would add a second, broken track.
     QSet<QString> idxStems;
@@ -247,26 +244,62 @@ QVector<SubtitleRef> Playlist::matchSubtitles(const QString &video,
             idxStems.insert(dirOf(file) + u'/' + stemOf(lastComponent(file)));
     }
 
-    QVector<SubtitleRef> found;
+    QVector<Playlist::Candidate> out;
     for (const QString &file : scope) {
         if (!PageSource::isSubtitleFile(file))
             continue;
-        if (QFileInfo(file).suffix().compare(u"sub"_s, Qt::CaseInsensitive) == 0
-            && idxStems.contains(dirOf(file) + u'/' + stemOf(lastComponent(file))))
-            continue;
-
         const QString dir = dirOf(file);
         const QString stem = stemOf(lastComponent(file));
-        const int episode = episodeNumber(file);
+        if (QFileInfo(file).suffix().compare(u"sub"_s, Qt::CaseInsensitive) == 0
+            && idxStems.contains(dir + u'/' + stem))
+            continue;
+
+        Playlist::Candidate c;
+        c.path = file;
+        c.dir = dir;
+        c.stem = stem;
+        c.folder = lastComponent(dir);
+        c.episode = episodeNumber(file);
+        c.folderEpisode = episodeNumber(c.folder);
+        c.inSubtitleFolder = inSubtitleFolder(dir);
+        c.lang = languageOf(file, &c.language);
+        out.append(c);
+    }
+    return out;
+}
+
+QVector<SubtitleRef> Playlist::matchSubtitles(const QString &video,
+                                              const QStringList &scope,
+                                              int videoCount,
+                                              const QString &urlPrefix)
+{
+    return matchSubtitles(video, candidates(scope), videoCount, urlPrefix);
+}
+
+QVector<SubtitleRef> Playlist::matchSubtitles(const QString &video,
+                                              const QVector<Candidate> &scope,
+                                              int videoCount,
+                                              const QString &urlPrefix)
+{
+    const QString videoDir = dirOf(video);
+    const QString videoStem = stemOf(lastComponent(video));
+    const int videoEpisode = episodeNumber(video);
+
+    QVector<SubtitleRef> found;
+    for (const Candidate &candidate : scope) {
+        const QString &file = candidate.path;
+        const QString &dir = candidate.dir;
+        const QString &stem = candidate.stem;
+        const int episode = candidate.episode;
 
         int rank = 0;
         if (dir == videoDir && stem.compare(videoStem, Qt::CaseInsensitive) == 0) {
             rank = 100;                                  // 01.mkv + 01.srt
         } else if (dir == videoDir && stem.startsWith(videoStem, Qt::CaseInsensitive)) {
             rank = 90;                                   // 01.mkv + 01.eng.srt
-        } else if (inSubtitleFolder(dir)) {
-            const QString folder = lastComponent(dir);
-            const int folderEpisode = episodeNumber(folder);
+        } else if (candidate.inSubtitleFolder) {
+            const QString &folder = candidate.folder;
+            const int folderEpisode = candidate.folderEpisode;
             if (stem.compare(videoStem, Qt::CaseInsensitive) == 0) {
                 rank = 85;                               // Subs/01.ass
             } else if (stem.startsWith(videoStem, Qt::CaseInsensitive)) {
@@ -297,8 +330,8 @@ QVector<SubtitleRef> Playlist::matchSubtitles(const QString &video,
         SubtitleRef ref;
         ref.url = urlPrefix.isEmpty() ? file : urlPrefix + file;
         ref.rank = rank;
-        QString display;
-        ref.lang = languageOf(file, &display);
+        const QString &display = candidate.language;
+        ref.lang = candidate.lang;
         // The filename carries information the language alone does not -- two
         // English subs from different DVD masters, forced-only tracks -- so the
         // title keeps it, and only falls back to the language.
@@ -354,12 +387,24 @@ void Playlist::build(const QStringList &files, const QString &urlPrefix)
     m_fontDirs = QStringList(fonts.begin(), fonts.end());
     m_fontDirs.sort();
 
+    // The "one video here, so any subtitle in Subs/ belongs to it" rule has to
+    // count videos, not entries. An album track sitting in the folder would
+    // otherwise make it two and quietly switch the rule off.
+    int videos = 0;
+    for (const QString &file : playable) {
+        if (PageSource::isVideoFile(file))
+            ++videos;
+    }
+    if (videos == 0)
+        videos = playable.size();
+
+    const QVector<Candidate> subs = candidates(files);
     for (const QString &file : playable) {
         MediaEntry entry;
         entry.name = file;
         entry.display = lastComponent(file);
         entry.url = urlPrefix.isEmpty() ? file : urlPrefix + file;
-        entry.subtitles = matchSubtitles(file, files, playable.size(), urlPrefix);
+        entry.subtitles = matchSubtitles(file, subs, videos, urlPrefix);
         m_entries.append(entry);
     }
 }
@@ -418,6 +463,25 @@ std::unique_ptr<Playlist> Playlist::open(const QString &path, int *startIndex, Q
         if (error)
             *error = u"no such folder"_s;
         return nullptr;
+    }
+
+    // A comic folder should not pay for a recursive walk it has no use for, and
+    // Book asks the playlist first on every single open. So: look at the top
+    // level only, and if it holds pictures and nothing playable, say so at once
+    // and let the reader have it. A season folder either has episodes at the
+    // top (walk on, the subtitles may be nested) or nothing at all at the top,
+    // which is exactly the Season 1/ case worth recursing for.
+    if (!single) {
+        bool shallowPlayable = false;
+        bool shallowImages = false;
+        for (const QFileInfo &fi : root.entryInfoList(QDir::Files | QDir::Readable, QDir::NoSort)) {
+            if (PageSource::isPlayableFile(fi.fileName()))
+                shallowPlayable = true;
+            else if (PageSource::isImageFile(fi.fileName()))
+                shallowImages = true;
+        }
+        if (!shallowPlayable && shallowImages)
+            return nullptr;
     }
 
     QStringList files;

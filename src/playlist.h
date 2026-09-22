@@ -56,10 +56,32 @@ public:
 
     int indexOfName(const QString &name) const;
 
+    // One candidate subtitle, with everything worked out that does not depend
+    // on the video it will be compared against. Hoisted out of the match loop
+    // because otherwise a folder of N episodes and M files runs the naming
+    // regexes N*M times to learn the same M answers.
+    struct Candidate {
+        QString path;
+        QString dir;
+        QString stem;
+        QString folder;          // last component of dir
+        QString lang;            // ISO code, if one was found
+        QString language;        // its display name
+        int episode = -1;
+        int folderEpisode = -1;
+        bool inSubtitleFolder = false;
+    };
+
+    static QVector<Candidate> candidates(const QStringList &scope);
+
     // Exposed for testing and for --list: given every file in scope, work out
     // which subtitles belong to `video`, best match first.
     static QVector<SubtitleRef> matchSubtitles(const QString &video,
                                                const QStringList &scope,
+                                               int videoCount,
+                                               const QString &urlPrefix);
+    static QVector<SubtitleRef> matchSubtitles(const QString &video,
+                                               const QVector<Candidate> &scope,
                                                int videoCount,
                                                const QString &urlPrefix);
 

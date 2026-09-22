@@ -70,7 +70,24 @@ int main(int argc, char *argv[])
     // API for the video to arrive as an ordinary texture the interface can be
     // drawn over. Qt picks Direct3D on Windows by default, so say so here --
     // before any QQuickWindow exists, which is the only time it takes effect.
-    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+    //
+    // This is also the one change that could stop the image viewer working on
+    // a machine whose OpenGL driver is broken, so there is a way out of it:
+    // R9VIEW_GRAPHICS_API=d3d11 (or vulkan, metal, software) gives up video to
+    // get the pictures back.
+    {
+        const QByteArray api = qgetenv("R9VIEW_GRAPHICS_API").toLower();
+        if (api.isEmpty() || api == "opengl")
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+        else if (api == "d3d11" || api == "direct3d11")
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
+        else if (api == "vulkan")
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::Vulkan);
+        else if (api == "metal")
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::Metal);
+        else if (api == "software")
+            QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+    }
 #endif
 
     QGuiApplication app(argc, argv);

@@ -3,11 +3,43 @@
 #include <QMetaObject>
 #include <QVariantMap>
 
+#include <QStandardPaths>
+
+#include <clocale>
+
 #include <mpv/client.h>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 using namespace Qt::StringLiterals;
 
 namespace {
+
+// Keep the screen on while something is actually playing.
+//
+// mpv normally does this itself, but stop-screensaver lives in its windowing
+// code and vo=libmpv gives it no window to do it from -- so choosing to render
+// into the scene graph is also choosing to take this on. Without it the display
+// blanks in the middle of a film, which is a hard thing to miss.
+void holdScreenAwake(bool awake)
+{
+#ifdef Q_OS_WIN
+    static bool held = false;
+    if (awake == held)
+        return;
+    held = awake;
+    // ES_CONTINUOUS alone restores normal behaviour; the flags only stack while
+    // they keep being asserted, which is what the continuous flag is for.
+    SetThreadExecutionState(awake ? (ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)
+                                  : ES_CONTINUOUS);
+#else
+    // On a freedesktop session this wants an org.freedesktop.ScreenSaver or
+    // portal Inhibit call; nothing is done for now rather than something wrong.
+    Q_UNUSED(awake);
+#endif
+}
 
 // mpv hands structured data back as a tree of mpv_node. Only the shapes that
 // actually turn up in the properties r9view observes are translated; anything
@@ -84,6 +116,7 @@ Player::Player(QObject *parent)
 
 Player::~Player()
 {
+    holdScreenAwake(false);
     if (g_instance == this)
         g_instance = nullptr;
     if (m_mpv) {
@@ -96,6 +129,13 @@ bool Player::ensureMpv()
 {
     if (m_mpv)
         return true;
+
+    // mpv_create() refuses to run under a numeric locale where the decimal
+    // separator is not a full stop, and QGuiApplication sets the locale from
+    // the system. On a machine configured for, say, German or Bengali that
+    // turns into "could not start the media player" and nothing else, so the
+    // one category mpv cares about is pinned back before asking.
+    std::setlocale(LC_NUMERIC, "C");
 
     m_mpv = mpv_create();
     if (!m_mpv) {
@@ -132,6 +172,12 @@ bool Player::ensureMpv()
     // Subs/ folders are ours and get added explicitly -- mpv never looks there.
     mpv_set_option_string(m_mpv, "sub-auto", "fuzzy");
     mpv_set_option_string(m_mpv, "volume-max", "150");
+    // Otherwise screenshots land in the working directory, which for a
+    // double-clicked file is wherever Explorer happened to be.
+    const QByteArray shots = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation).toUtf8();
+    if (!shots.isEmpty())
+        mpv_set_option_string(m_mpv, "screenshot-directory", shots.constData());
+    mpv_set_option_string(m_mpv, "screenshot-template", "r9view-%F-%P");
 
     if (mpv_initialize(m_mpv) < 0) {
         mpv_terminate_destroy(m_mpv);
@@ -181,6 +227,7 @@ void Player::pumpEvents()
             if (name == "pause"_L1 && prop->format == MPV_FORMAT_FLAG) {
                 const bool value = *static_cast<int *>(prop->data) != 0;
                 if (value != m_paused) { m_paused = value; emit pausedChanged(); }
+                holdScreenAwake(!m_paused && m_ready);
 
             } else if (name == "time-pos"_L1) {
                 // time-pos goes absent between files. Treating that as zero
@@ -261,6 +308,7 @@ void Player::pumpEvents()
 
         case MPV_EVENT_FILE_LOADED:
             if (!m_ready) { m_ready = true; emit readyChanged(); }
+            holdScreenAwake(!m_paused);
             readTracks();
             emit fileLoaded();
             break;
@@ -372,6 +420,7 @@ void Player::stop()
     const char *args[] = { "stop", nullptr };
     mpv_command(m_mpv, args);
     if (m_ready) { m_ready = false; emit readyChanged(); }
+    holdScreenAwake(false);
 }
 
 void Player::togglePause()
