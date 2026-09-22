@@ -64,6 +64,8 @@ if(R9VIEW_VIDEO)
     target_sources(r9view PRIVATE
         src/player.cpp
         src/player.h
+        src/playlist.cpp
+        src/playlist.h
         src/videosurface.cpp
         src/videosurface.h
     )

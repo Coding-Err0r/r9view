@@ -48,6 +48,77 @@ bool PageSource::isArchiveFile(const QString &name)
     return archiveSuffixes().contains(QFileInfo(name).suffix().toLower());
 }
 
+QStringList PageSource::videoSuffixes()
+{
+    // Everything a release is plausibly shipped in. mpv decides what it can
+    // actually decode; this list only decides what r9view offers to try.
+    static const QStringList list = {
+        u"mkv"_s,  u"mk3d"_s, u"mp4"_s,  u"m4v"_s,  u"mov"_s,  u"avi"_s,
+        u"webm"_s, u"ts"_s,   u"m2ts"_s, u"mts"_s,  u"m2t"_s,  u"tp"_s,
+        u"mpg"_s,  u"mpeg"_s, u"mpe"_s,  u"m1v"_s,  u"m2v"_s,  u"mpv"_s,
+        u"vob"_s,  u"ifo"_s,  u"wmv"_s,  u"asf"_s,  u"flv"_s,  u"f4v"_s,
+        u"ogv"_s,  u"ogm"_s,  u"rm"_s,   u"rmvb"_s, u"3gp"_s,  u"3g2"_s,
+        u"divx"_s, u"dv"_s,   u"mxf"_s,  u"nsv"_s,  u"roq"_s,  u"y4m"_s,
+        u"amv"_s,  u"svi"_s,  u"viv"_s,  u"drc"_s,  u"qt"_s,   u"yuv"_s,
+        u"h264"_s, u"h265"_s, u"hevc"_s, u"av1"_s,  u"ivf"_s,  u"264"_s,
+        u"265"_s,  u"avs"_s,  u"vpy"_s,  u"bik"_s,
+    };
+    return list;
+}
+
+QStringList PageSource::audioSuffixes()
+{
+    // An all-in-one player that cannot open the album sitting next to the show
+    // is an odd thing, and mpv plays these without any extra work.
+    static const QStringList list = {
+        u"mp3"_s,  u"flac"_s, u"wav"_s,  u"m4a"_s,  u"aac"_s,  u"ogg"_s,
+        u"oga"_s,  u"opus"_s, u"wma"_s,  u"alac"_s, u"ape"_s,  u"wv"_s,
+        u"mka"_s,  u"ac3"_s,  u"eac3"_s, u"dts"_s,  u"dtshd"_s, u"thd"_s,
+        u"mp2"_s,  u"mpa"_s,  u"aiff"_s, u"aif"_s,  u"au"_s,   u"caf"_s,
+        u"dsf"_s,  u"dff"_s,  u"tta"_s,  u"tak"_s,  u"shn"_s,  u"mpc"_s,
+        u"spx"_s,  u"amr"_s,  u"awb"_s,  u"ra"_s,   u"3ga"_s,  u"m4b"_s,
+    };
+    return list;
+}
+
+QStringList PageSource::subtitleSuffixes()
+{
+    // mpv's own --sub-auto-exts list, plus the few container-ish ones it will
+    // happily load through sub-add even though they are not in that default.
+    static const QStringList list = {
+        u"ass"_s,  u"ssa"_s,  u"srt"_s,  u"sub"_s,  u"idx"_s,  u"vtt"_s,
+        u"webvtt"_s, u"sup"_s, u"pgs"_s, u"smi"_s,  u"sami"_s, u"rt"_s,
+        u"sbv"_s,  u"scc"_s,  u"lrc"_s,  u"mks"_s,  u"utf"_s,  u"utf8"_s,
+        u"utf-8"_s, u"ttml"_s, u"dfxp"_s, u"mpl2"_s, u"pjs"_s,
+        // .txt is deliberately absent. Releases are full of ReadMe.txt and
+        // YIFYStatus.com.txt, and mpv does not claim it either.
+    };
+    return list;
+}
+
+bool PageSource::isVideoFile(const QString &name)
+{
+    const QString suffix = QFileInfo(name).suffix().toLower();
+    return !suffix.isEmpty() && videoSuffixes().contains(suffix);
+}
+
+bool PageSource::isAudioFile(const QString &name)
+{
+    const QString suffix = QFileInfo(name).suffix().toLower();
+    return !suffix.isEmpty() && audioSuffixes().contains(suffix);
+}
+
+bool PageSource::isSubtitleFile(const QString &name)
+{
+    const QString suffix = QFileInfo(name).suffix().toLower();
+    return !suffix.isEmpty() && subtitleSuffixes().contains(suffix);
+}
+
+bool PageSource::isPlayableFile(const QString &name)
+{
+    return isVideoFile(name) || isAudioFile(name);
+}
+
 // ---------------------------------------------------------------- folder ----
 
 FolderSource::FolderSource(const QString &dir)
@@ -243,6 +314,30 @@ QByteArray ArchiveSource::read(int index)
     // Ran off the end without finding it -- the archive changed under us.
     closeHandle();
     return {};
+}
+
+QStringList PageSource::archiveEntryNames(const QString &path, QString *error)
+{
+    QStringList names;
+    archive *a = newReader();
+    if (archive_read_open_filename(a, QFile::encodeName(path).constData(), 1 << 17) != ARCHIVE_OK) {
+        if (error)
+            *error = QString::fromUtf8(archive_error_string(a));
+        archive_read_free(a);
+        return names;
+    }
+
+    archive_entry *entry = nullptr;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        if (archive_entry_filetype(entry) == AE_IFDIR)
+            continue;
+        const QString name = entryName(entry);
+        if (name.isEmpty() || isJunk(name))
+            continue;
+        names.append(name);
+    }
+    archive_read_free(a);
+    return names;
 }
 
 // ------------------------------------------------------------------ open ----

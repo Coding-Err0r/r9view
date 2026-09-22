@@ -12,10 +12,38 @@
 #include <QTextStream>
 
 #ifdef R9VIEW_VIDEO
+#include "playlist.h"
 #include <QQuickWindow>
 #endif
 
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
+
 using namespace Qt::StringLiterals;
+
+#ifdef Q_OS_WIN
+// A release build on Windows is a GUI-subsystem binary, so that double-clicking
+// a comic does not flash up a console. The cost is that it starts with no
+// stdout at all, which would quietly turn --list, --help and --version into
+// commands that print nothing. Borrowing the console of whatever launched us
+// fixes that, and does nothing when there is no console -- which is exactly the
+// case when the app was started from Explorer.
+static void borrowParentConsole()
+{
+    // If stdout already goes somewhere -- a pipe, a file, a redirect -- then it
+    // works as it is, and reopening it onto the console would be the thing that
+    // broke it. Only step in when there is nothing there at all.
+    const HANDLE existing = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (existing && existing != INVALID_HANDLE_VALUE)
+        return;
+    if (!AttachConsole(ATTACH_PARENT_PROCESS))
+        return;
+    FILE *stream = nullptr;
+    freopen_s(&stream, "CONOUT$", "w", stdout);
+    freopen_s(&stream, "CONOUT$", "w", stderr);
+}
+#endif
 
 // Qt's own log output goes nowhere useful in some desktop sessions, which makes
 // a QML warning impossible to see. R9VIEW_DEBUG=1 forces every message straight
@@ -29,6 +57,10 @@ static void stderrLogger(QtMsgType, const QMessageLogContext &context, const QSt
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_WIN
+    borrowParentConsole();
+#endif
+
     if (qEnvironmentVariableIsSet("R9VIEW_DEBUG"))
         qInstallMessageHandler(stderrLogger);
 
@@ -74,12 +106,33 @@ int main(int argc, char *argv[])
         }
         int start = 0;
         QString error;
+        QTextStream out(stdout);
+
+#ifdef R9VIEW_VIDEO
+        // Video first, because it is the reading that can be checked least
+        // easily by eye: --list is the quickest way to see which subtitle a
+        // nested Subs/ folder actually matched to which episode.
+        if (const auto list = Playlist::open(targets.first(), &start, &error)) {
+            for (int i = 0; i < list->count(); ++i) {
+                const MediaEntry &entry = list->entries().at(i);
+                out << (i + 1) << "\t" << entry.name << "\n";
+                for (const SubtitleRef &sub : entry.subtitles) {
+                    out << "\t\tsub [" << sub.rank << "] "
+                        << (sub.lang.isEmpty() ? u"??"_s : sub.lang) << "  "
+                        << sub.title << "  <- " << sub.url << "\n";
+                }
+            }
+            for (const QString &dir : list->fontDirs())
+                out << "\tfonts\t" << dir << "\n";
+            return 0;
+        }
+#endif
+
         const auto source = PageSource::open(targets.first(), &start, &error);
         if (!source) {
             qWarning("%s: %s", qPrintable(targets.first()), qPrintable(error));
             return 1;
         }
-        QTextStream out(stdout);
         for (int i = 0; i < source->count(); ++i)
             out << (i + 1) << "\t" << source->entries().at(i).name << "\n";
         return 0;
