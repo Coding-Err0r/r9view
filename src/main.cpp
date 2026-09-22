@@ -11,6 +11,10 @@
 #include <QQuickStyle>
 #include <QTextStream>
 
+#ifdef R9VIEW_VIDEO
+#include <QQuickWindow>
+#endif
+
 using namespace Qt::StringLiterals;
 
 // Qt's own log output goes nowhere useful in some desktop sessions, which makes
@@ -27,6 +31,15 @@ int main(int argc, char *argv[])
 {
     if (qEnvironmentVariableIsSet("R9VIEW_DEBUG"))
         qInstallMessageHandler(stderrLogger);
+
+#ifdef R9VIEW_VIDEO
+    // mpv renders through OpenGL, and the scene graph has to be on the same
+    // API for the video to arrive as an ordinary texture the interface can be
+    // drawn over. Qt picks Direct3D on Windows by default, so say so here --
+    // before any QQuickWindow exists, which is the only time it takes effect.
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#endif
+
     QGuiApplication app(argc, argv);
     app.setApplicationName(u"r9view"_s);
     app.setOrganizationName(u"r9view"_s);
