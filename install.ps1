@@ -196,7 +196,20 @@ try {
   }
 
   # ---- uninstaller ---------------------------------------------------------
-  Copy-Item $PSCommandPath (Join-Path $Prefix "install.ps1") -Force -ErrorAction SilentlyContinue
+  # A copy of this script is what -Uninstall runs later. Piped through iex --
+  # which is how the README tells people to install -- there is no file on disk
+  # to copy and $PSCommandPath is empty, so fetch the same script instead.
+  $selfCopy = Join-Path $Prefix "install.ps1"
+  if ($PSCommandPath -and (Test-Path $PSCommandPath)) {
+    Copy-Item $PSCommandPath $selfCopy -Force
+  } else {
+    try {
+      Invoke-WebRequest "https://raw.githubusercontent.com/$Repo/main/install.ps1" `
+          -OutFile $selfCopy -UseBasicParsing
+    } catch {
+      Warn "could not save an uninstaller; remove $Prefix by hand if you need to"
+    }
+  }
   $unins = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\r9view"
   New-Item -Path $unins -Force | Out-Null
   Set-ItemProperty -Path $unins -Name "DisplayName" -Value "r9view"
@@ -204,8 +217,13 @@ try {
   Set-ItemProperty -Path $unins -Name "InstallLocation" -Value $Prefix
   Set-ItemProperty -Path $unins -Name "Publisher" -Value "Rhineul Islam"
   Set-ItemProperty -Path $unins -Name "NoModify" -Value 1 -Type DWord
-  Set-ItemProperty -Path $unins -Name "UninstallString" `
-      -Value "powershell -NoProfile -ExecutionPolicy Bypass -File `"$Prefix\install.ps1`" -Uninstall -Prefix `"$Prefix`""
+  # Only advertise an uninstall command if the script it names is actually
+  # there. An entry in Apps and features whose uninstaller does not exist is
+  # worse than no entry at all.
+  if (Test-Path $selfCopy) {
+    Set-ItemProperty -Path $unins -Name "UninstallString" `
+        -Value "powershell -NoProfile -ExecutionPolicy Bypass -File `"$Prefix\install.ps1`" -Uninstall -Prefix `"$Prefix`""
+  }
 
   Write-Host ""
   Write-Host "r9view is installed." -ForegroundColor Green
