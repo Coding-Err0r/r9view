@@ -3,3 +3,4 @@ build/
 .qmlls.ini
 compile_commands.json
 *.user
+dist/

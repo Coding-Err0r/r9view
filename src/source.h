@@ -49,10 +49,28 @@ public:
     static bool isImageFile(const QString &name);
     static bool isArchiveFile(const QString &name);
 
+    // What mpv is handed rather than Qt. These lists are deliberately generous:
+    // mpv demuxes far more than it is ever asked to, and a container missing
+    // from the list is a file the user cannot open, which is the worse failure.
+    static QStringList videoSuffixes();
+    static QStringList audioSuffixes();
+    static QStringList subtitleSuffixes();
+    static bool isVideoFile(const QString &name);
+    static bool isAudioFile(const QString &name);
+    static bool isSubtitleFile(const QString &name);
+    // Video or audio: anything the player, rather than the reader, should get.
+    static bool isPlayableFile(const QString &name);
+
     // Opens whatever `path` points at: a directory, an archive, or a single
     // image (which opens its whole folder, positioned on that image).
     // `startIndex` receives the page to land on. Returns null on failure.
     static std::unique_ptr<PageSource> open(const QString &path, int *startIndex, QString *error);
+
+    // Every member name in an archive, unfiltered and in archive order. The
+    // image reader wants only pictures, but a playlist needs to see the whole
+    // listing -- the videos, the subtitles in nested Subs/ folders, and the
+    // fonts -- so enumeration lives here where the libarchive code already is.
+    static QStringList archiveEntryNames(const QString &path, QString *error);
 
 protected:
     QVector<PageEntry> m_entries;
