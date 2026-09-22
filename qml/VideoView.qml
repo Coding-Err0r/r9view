@@ -176,45 +176,59 @@ Item {
         onTriggered: view.skipTotal = 0
     }
 
-    Repeater {
-        model: 2
-        delegate: Item {
-            id: ripple
-            required property int index
-            readonly property bool forward: index === 1
-            width: view.width / 3
-            height: view.height
-            x: ripple.forward ? view.width - width : 0
-            opacity: view.skipTotal > 0 && view.skipForward === ripple.forward ? 1 : 0
-            visible: opacity > 0
-            Behavior on opacity { NumberAnimation { duration: 180 } }
+    // The two skip zones, written out rather than generated, so that each one is
+    // anchored to the edge it belongs to and there is no arithmetic to get wrong.
+    component SkipRipple: Item {
+        id: ripple
+        property bool forward: true
 
-            Rectangle {
-                anchors.centerIn: parent
-                width: Math.min(ripple.width, ripple.height) * 0.9
-                height: width
-                radius: width / 2
-                color: Qt.rgba(1, 1, 1, 0.12)
-            }
+        width: view.width / 3
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
 
-            Column {
+        opacity: view.skipTotal > 0 && view.skipForward === ripple.forward ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: Math.min(ripple.width, ripple.height) * 0.9
+            height: width
+            radius: width / 2
+            color: Qt.rgba(1, 1, 1, 0.12)
+        }
+
+        // The number sits on a solid pill rather than straight on the picture.
+        // Thin text over video is only legible when the video happens to be
+        // dark, which is not something to rely on.
+        Rectangle {
+            anchors.centerIn: parent
+            width: badge.implicitWidth + 30
+            height: 46
+            radius: 23
+            color: Qt.rgba(0.05, 0.05, 0.07, 0.82)
+            border.width: 1
+            border.color: Theme.line
+
+            Text {
+                id: badge
                 anchors.centerIn: parent
-                spacing: 6
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: ripple.forward ? "▶▶" : "◀◀"
-                    color: Theme.text
-                    font.pixelSize: 26
-                }
-                Text {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: view.skipTotal + "s"
-                    color: Theme.text
-                    font.pixelSize: Theme.fontLg
-                    font.weight: Font.DemiBold
-                }
+                text: (ripple.forward ? "▶▶  " : "◀◀  ") + view.skipTotal + "s"
+                color: Theme.text
+                font.pixelSize: Theme.fontLg
+                font.weight: Font.DemiBold
             }
         }
+    }
+
+    SkipRipple {
+        forward: false
+        anchors.left: parent.left
+    }
+
+    SkipRipple {
+        forward: true
+        anchors.right: parent.right
     }
 
     // ---- a badge while held at speed --------------------------------------

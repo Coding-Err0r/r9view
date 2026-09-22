@@ -384,7 +384,13 @@ void Player::seekBy(double seconds)
     if (!m_mpv)
         return;
     const QByteArray amount = QByteArray::number(seconds, 'f', 3);
-    const char *args[] = { "seek", amount.constData(), "relative", nullptr };
+    // Exact, not the keyframe seek mpv does by default. The interface puts a
+    // number on the screen -- "10s" under the skip ripple -- and it has to be
+    // the truth. Measured on a file with a ten-second GOP, three keyframe skips
+    // of ten seconds moved playback thirty-two seconds and landed on whichever
+    // keyframe was nearest; exact seeking costs a little decoding and lands
+    // where it says.
+    const char *args[] = { "seek", amount.constData(), "relative+exact", nullptr };
     mpv_command(m_mpv, args);
 }
 
@@ -393,7 +399,7 @@ void Player::seekTo(double seconds)
     if (!m_mpv)
         return;
     const QByteArray amount = QByteArray::number(seconds, 'f', 3);
-    const char *args[] = { "seek", amount.constData(), "absolute", nullptr };
+    const char *args[] = { "seek", amount.constData(), "absolute+exact", nullptr };
     mpv_command(m_mpv, args);
 }
 
