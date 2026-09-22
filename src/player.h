@@ -52,6 +52,14 @@ class Player : public QObject
     Q_PROPERTY(int audioTrack READ audioTrack WRITE setAudioTrack NOTIFY audioTrackChanged)
     Q_PROPERTY(int subtitleTrack READ subtitleTrack WRITE setSubtitleTrack NOTIFY subtitleTrackChanged)
     Q_PROPERTY(double subDelay READ subDelay WRITE setSubDelay NOTIFY subDelayChanged)
+    Q_PROPERTY(bool subtitleVisible READ subtitleVisible WRITE setSubtitleVisible NOTIFY subtitleVisibleChanged)
+
+    // Driven by gestures: a vertical drag on the left of the picture changes
+    // brightness, and a pinch zooms. Both are mpv's own -- zooming the picture
+    // rather than scaling the item keeps it sharp, because mpv rescales from the
+    // decoded frame instead of stretching a texture.
+    Q_PROPERTY(int brightness READ brightness WRITE setBrightness NOTIFY brightnessChanged)
+    Q_PROPERTY(double videoZoom READ videoZoom WRITE setVideoZoom NOTIFY videoZoomChanged)
 
 public:
     explicit Player(QObject *parent = nullptr);
@@ -83,6 +91,9 @@ public:
     int audioTrack() const { return m_audioTrack; }
     int subtitleTrack() const { return m_subtitleTrack; }
     double subDelay() const { return m_subDelay; }
+    bool subtitleVisible() const { return m_subtitleVisible; }
+    int brightness() const { return m_brightness; }
+    double videoZoom() const { return m_videoZoom; }
 
     void setPaused(bool paused);
     void setPosition(double seconds);
@@ -92,6 +103,9 @@ public:
     void setAudioTrack(int id);
     void setSubtitleTrack(int id);
     void setSubDelay(double seconds);
+    void setSubtitleVisible(bool visible);
+    void setBrightness(int value);
+    void setVideoZoom(double value);
 
     // `url` is either a plain filesystem path or, for a member of an archive,
     // an archive://<archive>|<entry> URL. mpv is linked against libarchive and
@@ -103,10 +117,20 @@ public:
     Q_INVOKABLE void seekTo(double seconds);
     Q_INVOKABLE void frameStep(int direction);
     Q_INVOKABLE void addSubtitle(const QString &url, const QString &title = {}, const QString &lang = {});
+    // mpv's own cycle command. Keeping it generic is what lets the keyboard
+    // bindings stay a one-line mapping instead of a method per property.
+    Q_INVOKABLE void cycle(const QString &property, bool reverse = false);
+    Q_INVOKABLE void screenshot();
     Q_INVOKABLE void clearError();
 
     // Formats seconds as h:mm:ss (or m:ss under an hour) for the bars.
     Q_INVOKABLE static QString formatTime(double seconds);
+
+    // Called by the render surface once its mpv render context exists, and
+    // again if it goes away. vo=libmpv refuses to initialise without one, so a
+    // file opened before the surface is up would fail outright -- open() holds
+    // the URL until this says the scene graph is ready for it.
+    void notifyRenderContext(bool ready);
 
 signals:
     void availableChanged();
@@ -126,6 +150,9 @@ signals:
     void audioTrackChanged();
     void subtitleTrackChanged();
     void subDelayChanged();
+    void subtitleVisibleChanged();
+    void brightnessChanged();
+    void videoZoomChanged();
 
     // The render surface watches this: the handle it renders through only
     // exists once a file has been opened.
@@ -138,7 +165,7 @@ private:
     bool ensureMpv();          // create and initialise libmpv on first use
     void pumpEvents();         // drain mpv's queue on the GUI thread
     void readTracks();
-    void command(const QVariantList &args);
+    void flushPendingOpen();
 
     mpv_handle *m_mpv = nullptr;
     bool m_available = false;
@@ -159,4 +186,9 @@ private:
     int m_audioTrack = 0;
     int m_subtitleTrack = 0;
     double m_subDelay = 0;
+    bool m_subtitleVisible = true;
+    int m_brightness = 0;
+    double m_videoZoom = 0;
+    QString m_pendingUrl;
+    bool m_renderReady = false;
 };

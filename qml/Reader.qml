@@ -27,7 +27,11 @@ Item {
         id: view
         anchors.fill: parent
 
-        model: Book.count
+        // Empty unless images are what is open. A video keeps Book.count and
+        // Book.index for its own playlist, and leaving the model bound to it
+        // would have these delegates asking the page provider for pages that
+        // belong to no book, which it rightly refuses.
+        model: Book.kind === Book.Images ? Book.count : 0
         orientation: ListView.Horizontal
         layoutDirection: Book.rightToLeft ? Qt.RightToLeft : Qt.LeftToRight
         snapMode: ListView.SnapOneItem

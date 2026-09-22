@@ -1,5 +1,6 @@
 #pragma once
 
+#include "playlist.h"
 #include "source.h"
 
 #include <QMutex>
@@ -7,6 +8,7 @@
 #include <QQmlEngine>
 #include <QStringList>
 #include <QUrl>
+#include <QVariantList>
 
 #include <memory>
 
@@ -56,12 +58,26 @@ class Book : public QObject
     Q_PROPERTY(bool rightToLeft READ rightToLeft WRITE setRightToLeft NOTIFY rightToLeftChanged)
     Q_PROPERTY(int fitMode READ fitMode WRITE setFitMode NOTIFY fitModeChanged)
 
+    // Which kind of thing is open, and so which surface the window shows. The
+    // page-shaped properties above still describe it either way: a playlist has
+    // a count and an index exactly as a book does, and next()/previous() move
+    // through episodes as readily as through pages.
+    Q_PROPERTY(int kind READ kind NOTIFY kindChanged)
+    // What the player should load for the current entry, and the subtitles that
+    // were found for it. Both empty unless a video is open.
+    Q_PROPERTY(QString mediaUrl READ mediaUrl NOTIFY mediaUrlChanged)
+    Q_PROPERTY(QVariantList mediaSubtitles READ mediaSubtitles NOTIFY mediaSubtitlesChanged)
+    Q_PROPERTY(QStringList fontDirs READ fontDirs NOTIFY fontDirsChanged)
+
 public:
     explicit Book(QObject *parent = nullptr);
     ~Book() override;
 
     enum FitMode { FitWindow = 0, FitWidth = 1, FitHeight = 2, Original = 3 };
     Q_ENUM(FitMode)
+
+    enum MediaKind { NothingOpen = 0, Images = 1, Video = 2 };
+    Q_ENUM(MediaKind)
 
     PageStore *store() { return &m_store; }
 
@@ -78,6 +94,10 @@ public:
     QStringList recent() const { return m_recent; }
     bool rightToLeft() const { return m_rightToLeft; }
     int fitMode() const { return m_fitMode; }
+    int kind() const { return m_kind; }
+    QString mediaUrl() const;
+    QVariantList mediaSubtitles() const;
+    QStringList fontDirs() const;
 
     void setIndex(int i);
     void setRightToLeft(bool rtl);
@@ -96,6 +116,13 @@ public:
     // Absolute path of a page on disk, empty for pages inside an archive.
     Q_INVOKABLE QString pageFilePath(int i) const;
 
+    // Where playback of the current entry had got to, so an episode reopens
+    // where it was left. Kept per entry rather than per playlist, because
+    // stopping halfway through episode 4 says nothing about episode 5. The
+    // interface supplies the time, since only the player knows it.
+    Q_INVOKABLE void rememberMediaTime(double seconds, double duration);
+    Q_INVOKABLE double mediaResumeTime() const;
+
 signals:
     void readyChanged();
     void titleChanged();
@@ -110,15 +137,29 @@ signals:
     void recentChanged();
     void rightToLeftChanged();
     void fitModeChanged();
+    void kindChanged();
+    void mediaUrlChanged();
+    void mediaSubtitlesChanged();
+    void fontDirsChanged();
     void opened();
 
 private:
-    void adopt(std::shared_ptr<PageSource> source, int startIndex, const QString &error);
+    // What an open attempt produced: one of the two sources, or neither.
+    struct Opened {
+        std::shared_ptr<PageSource> pages;
+        std::shared_ptr<Playlist> media;
+        int start = 0;
+        QString error;
+    };
+
+    void adopt(const Opened &result);
     void rememberPosition() const;
     void pushRecent(const QString &path);
     void loadSettings();
 
     PageStore m_store;
+    std::shared_ptr<Playlist> m_media;
+    int m_kind = NothingOpen;
     QString m_title;
     QString m_location;
     bool m_isArchive = false;

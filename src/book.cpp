@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QPointer>
 #include <QSettings>
+#include <QVariantMap>
 #include <QtConcurrent/QtConcurrentRun>
 
 using namespace Qt::StringLiterals;
@@ -19,7 +20,21 @@ QString bookmarkKey(const QString &path)
     return u"bookmarks/"_s + QString::fromLatin1(h.toHex().left(16));
 }
 
+// Playback position of one episode. Deliberately a different prefix from
+// bookmarks/: a page number and a timestamp are not the same thing, and mixing
+// them would make old settings files mean something new.
+QString resumeKey(const QString &url)
+{
+    const QByteArray h = QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1);
+    return u"resume/"_s + QString::fromLatin1(h.toHex().left(16));
+}
+
 constexpr int kMaxRecent = 24;
+
+// Below this, whatever happened was not really watching, and above the tail end
+// the episode is finished -- neither is worth reopening at.
+constexpr double kResumeFloor = 30.0;
+constexpr double kResumeTailFraction = 0.98;
 } // namespace
 
 // ------------------------------------------------------------- PageStore ----
@@ -68,6 +83,11 @@ void Book::loadSettings()
 
 QString Book::pageName() const
 {
+    if (m_media) {
+        if (m_index < 0 || m_index >= m_media->count())
+            return {};
+        return m_media->entries().at(m_index).display;
+    }
     auto src = m_store.get(m_generation);
     if (!src || m_index < 0 || m_index >= src->count())
         return {};
@@ -110,46 +130,69 @@ void Book::openPath(const QString &path)
     // quick for a 2 GB omnibus -- either way it does not belong on the UI thread.
     QPointer<Book> self(this);
     auto future = QtConcurrent::run([absolute] {
-        int start = 0;
-        QString error;
-        std::shared_ptr<PageSource> source = PageSource::open(absolute, &start, &error);
-        return std::make_tuple(source, start, error);
+        Opened result;
+#ifdef R9VIEW_VIDEO
+        // Video is asked first, and answers only when it finds something it can
+        // play, so a folder of pictures or a comic archive falls straight
+        // through to the reader exactly as it always did.
+        result.media = Playlist::open(absolute, &result.start, &result.error);
+        if (result.media)
+            return result;
+        result.error.clear();
+#endif
+        result.pages = PageSource::open(absolute, &result.start, &result.error);
+        return result;
     });
 
-    auto *watcher = new QFutureWatcher<std::tuple<std::shared_ptr<PageSource>, int, QString>>(this);
+    auto *watcher = new QFutureWatcher<Opened>(this);
     connect(watcher, &QFutureWatcherBase::finished, this, [self, watcher, token] {
-        const auto [source, start, error] = watcher->result();
+        const Opened result = watcher->result();
         watcher->deleteLater();
         if (!self || token != self->m_openToken)
             return; // a newer open won the race
-        self->adopt(source, start, error);
+        self->adopt(result);
     });
     watcher->setFuture(future);
 }
 
-void Book::adopt(std::shared_ptr<PageSource> source, int startIndex, const QString &error)
+void Book::adopt(const Opened &result)
 {
     m_busy = false;
     emit busyChanged();
 
-    if (!source) {
-        m_error = error.isEmpty() ? u"could not open that"_s : error;
+    if (!result.pages && !result.media) {
+        m_error = result.error.isEmpty() ? u"could not open that"_s : result.error;
         emit errorChanged();
         return;
     }
 
-    const QString path = source->location();
-    m_title = source->title();
+    QString path;
+    if (result.media) {
+        path = result.media->location();
+        m_title = result.media->title();
+        m_isArchive = result.media->isArchive();
+        m_count = result.media->count();
+        m_media = result.media;
+        // The image pipeline is emptied rather than left holding the last book:
+        // its generation still bumps, so any page request already in flight
+        // resolves to nothing instead of drawing over a video.
+        m_store.set(nullptr);
+        m_kind = Video;
+    } else {
+        path = result.pages->location();
+        m_title = result.pages->title();
+        m_isArchive = result.pages->isArchive();
+        m_count = result.pages->count();
+        m_media.reset();
+        m_store.set(result.pages);
+        m_kind = Images;
+    }
     m_location = path;
-    m_isArchive = source->isArchive();
-    m_count = source->count();
-
-    m_store.set(std::move(source));
     m_generation = m_store.generation();
 
-    // Resume where this book was left, unless we were told to land on a
-    // specific image (opening a single file from a folder).
-    int start = startIndex;
+    // Resume where this was left, unless we were told to land somewhere
+    // specific (opening a single file out of a folder).
+    int start = result.start;
     if (start == 0) {
         QSettings s;
         start = s.value(bookmarkKey(path), 0).toInt();
@@ -164,9 +207,67 @@ void Book::adopt(std::shared_ptr<PageSource> source, int startIndex, const QStri
     emit countChanged();
     emit generationChanged();
     emit readyChanged();
+    emit kindChanged();
     emit indexChanged();
     emit pageNameChanged();
+    emit mediaUrlChanged();
+    emit mediaSubtitlesChanged();
+    emit fontDirsChanged();
     emit opened();
+}
+
+// ----------------------------------------------------------------- video ----
+
+QString Book::mediaUrl() const
+{
+    if (!m_media || m_index < 0 || m_index >= m_media->count())
+        return {};
+    return m_media->entries().at(m_index).url;
+}
+
+QVariantList Book::mediaSubtitles() const
+{
+    QVariantList out;
+    if (!m_media || m_index < 0 || m_index >= m_media->count())
+        return out;
+    for (const SubtitleRef &sub : m_media->entries().at(m_index).subtitles) {
+        QVariantMap map;
+        map.insert(u"url"_s, sub.url);
+        map.insert(u"title"_s, sub.title);
+        map.insert(u"lang"_s, sub.lang);
+        map.insert(u"rank"_s, sub.rank);
+        out.append(map);
+    }
+    return out;
+}
+
+QStringList Book::fontDirs() const
+{
+    return m_media ? m_media->fontDirs() : QStringList();
+}
+
+void Book::rememberMediaTime(double seconds, double duration)
+{
+    const QString url = mediaUrl();
+    if (url.isEmpty())
+        return;
+    QSettings s;
+    // Finishing an episode should not reopen it three seconds from the end
+    // forever -- the same rule rememberPosition() applies to a finished book --
+    // and a few seconds in is not a position worth keeping either.
+    const bool finished = duration > 0 && seconds >= duration * kResumeTailFraction;
+    if (seconds < kResumeFloor || finished)
+        s.remove(resumeKey(url));
+    else
+        s.setValue(resumeKey(url), seconds);
+}
+
+double Book::mediaResumeTime() const
+{
+    const QString url = mediaUrl();
+    if (url.isEmpty())
+        return 0;
+    return QSettings().value(resumeKey(url), 0.0).toDouble();
 }
 
 void Book::close()
@@ -174,6 +275,8 @@ void Book::close()
     rememberPosition();
     m_store.set(nullptr);
     m_generation = m_store.generation();
+    m_media.reset();
+    m_kind = NothingOpen;
     m_title.clear();
     m_location.clear();
     m_count = 0;
@@ -185,8 +288,12 @@ void Book::close()
     emit countChanged();
     emit generationChanged();
     emit readyChanged();
+    emit kindChanged();
     emit indexChanged();
     emit pageNameChanged();
+    emit mediaUrlChanged();
+    emit mediaSubtitlesChanged();
+    emit fontDirsChanged();
 }
 
 void Book::setIndex(int i)
@@ -199,6 +306,10 @@ void Book::setIndex(int i)
     m_index = clamped;
     emit indexChanged();
     emit pageNameChanged();
+    if (m_media) {
+        emit mediaUrlChanged();
+        emit mediaSubtitlesChanged();
+    }
 }
 
 void Book::next()     { setIndex(m_index + 1); }

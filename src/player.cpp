@@ -62,7 +62,10 @@ constexpr Observed kObserved[] = {
     { "aid",              MPV_FORMAT_INT64 },
     { "sid",              MPV_FORMAT_INT64 },
     { "sub-delay",        MPV_FORMAT_DOUBLE },
+    { "sub-visibility",   MPV_FORMAT_FLAG },
     { "video-params/w",   MPV_FORMAT_INT64 },
+    { "brightness",       MPV_FORMAT_INT64 },
+    { "video-zoom",       MPV_FORMAT_DOUBLE },
 };
 
 } // namespace
@@ -118,10 +121,13 @@ bool Player::ensureMpv()
     // Hold the last frame rather than tearing everything down at the end, so
     // the interface can offer the next episode over a still picture.
     mpv_set_option_string(m_mpv, "keep-open", "yes");
-    // auto-copy rather than auto-safe: frames have to come back to system
-    // memory to reach an OpenGL FBO. Measured as d3d11va-copy on this machine,
-    // which decodes 10-bit HEVC without breaking a sweat.
-    mpv_set_option_string(m_mpv, "hwdec", "auto-copy");
+    // Copy-back decoding rather than auto-safe: the frames have to come back to
+    // system memory to reach an OpenGL FBO. The list is spelled out instead of
+    // using auto-copy so that ffmpeg does not spend the first second of every
+    // file probing Vulkan and CUDA and logging each failure. d3d11va-copy is
+    // what wins on this machine, and it decodes 10-bit HEVC without effort.
+    mpv_set_option_string(m_mpv, "hwdec",
+                          "d3d11va-copy,nvdec-copy,dxva2-copy,vaapi-copy,videotoolbox-copy,no");
     // Subtitles sitting next to the video are mpv's to find. The ones in nested
     // Subs/ folders are ours and get added explicitly -- mpv never looks there.
     mpv_set_option_string(m_mpv, "sub-auto", "fuzzy");
@@ -232,6 +238,18 @@ void Player::pumpEvents()
                 const double value = *static_cast<double *>(prop->data);
                 if (!qFuzzyCompare(value + 1, m_subDelay + 1)) { m_subDelay = value; emit subDelayChanged(); }
 
+            } else if (name == "sub-visibility"_L1 && prop->format == MPV_FORMAT_FLAG) {
+                const bool value = *static_cast<int *>(prop->data) != 0;
+                if (value != m_subtitleVisible) { m_subtitleVisible = value; emit subtitleVisibleChanged(); }
+
+            } else if (name == "brightness"_L1 && prop->format == MPV_FORMAT_INT64) {
+                const int value = int(*static_cast<qint64 *>(prop->data));
+                if (value != m_brightness) { m_brightness = value; emit brightnessChanged(); }
+
+            } else if (name == "video-zoom"_L1 && prop->format == MPV_FORMAT_DOUBLE) {
+                const double value = *static_cast<double *>(prop->data);
+                if (!qFuzzyCompare(value + 1, m_videoZoom + 1)) { m_videoZoom = value; emit videoZoomChanged(); }
+
             } else if (name == "video-params/w"_L1) {
                 // The property only has a value once a video stream is
                 // decoding, which is exactly the question being asked.
@@ -321,7 +339,28 @@ void Player::open(const QString &url)
     if (url.isEmpty() || !ensureMpv())
         return;
 
-    const QByteArray target = url.toUtf8();
+    // Creating the handle is what lets the surface build its render context, so
+    // it has to happen first -- but the file cannot be handed over until that
+    // context exists, or mpv fails to bring up vo=libmpv and plays nothing.
+    m_pendingUrl = url;
+    flushPendingOpen();
+}
+
+void Player::notifyRenderContext(bool ready)
+{
+    if (ready == m_renderReady)
+        return;
+    m_renderReady = ready;
+    if (ready)
+        flushPendingOpen();
+}
+
+void Player::flushPendingOpen()
+{
+    if (!m_mpv || !m_renderReady || m_pendingUrl.isEmpty())
+        return;
+    const QByteArray target = m_pendingUrl.toUtf8();
+    m_pendingUrl.clear();
     const char *args[] = { "loadfile", target.constData(), "replace", nullptr };
     mpv_command(m_mpv, args);
 }
@@ -458,6 +497,50 @@ void Player::setSubDelay(double seconds)
         return;
     double value = seconds;
     mpv_set_property(m_mpv, "sub-delay", MPV_FORMAT_DOUBLE, &value);
+}
+
+void Player::setSubtitleVisible(bool visible)
+{
+    if (!m_mpv)
+        return;
+    int flag = visible ? 1 : 0;
+    mpv_set_property(m_mpv, "sub-visibility", MPV_FORMAT_FLAG, &flag);
+}
+
+void Player::cycle(const QString &property, bool reverse)
+{
+    if (!m_mpv)
+        return;
+    const QByteArray name = property.toUtf8();
+    const char *args[] = { "cycle", name.constData(), reverse ? "down" : "up", nullptr };
+    mpv_command(m_mpv, args);
+}
+
+void Player::screenshot()
+{
+    if (!m_mpv)
+        return;
+    // "video" takes the frame without subtitles or any of our own drawing on
+    // it, which is what someone grabbing a frame almost always wants.
+    const char *args[] = { "screenshot", "video", nullptr };
+    mpv_command(m_mpv, args);
+}
+
+void Player::setBrightness(int value)
+{
+    if (!m_mpv)
+        return;
+    qint64 clamped = qBound(-100, value, 100);
+    mpv_set_property(m_mpv, "brightness", MPV_FORMAT_INT64, &clamped);
+}
+
+void Player::setVideoZoom(double value)
+{
+    if (!m_mpv)
+        return;
+    // mpv's video-zoom is a power of two: 0 is actual size, 1 is twice as big.
+    double clamped = qBound(-2.0, value, 3.0);
+    mpv_set_property(m_mpv, "video-zoom", MPV_FORMAT_DOUBLE, &clamped);
 }
 
 QString Player::formatTime(double seconds)

@@ -40,7 +40,8 @@ Rectangle {
         IconButton {
             icon: "grid"
             tip: qsTr("All pages (G)")
-            enabledWhen: Book.ready
+            // A grid of page thumbnails means nothing for a playlist of videos.
+            enabledWhen: Book.ready && Book.kind === Book.Images
             onClicked: bar.gridRequested()
         }
     }
@@ -76,14 +77,16 @@ Rectangle {
         anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
         spacing: 2
 
+        // How a page is sized and which way a book reads are questions only a
+        // comic asks. A video has its own controls, in its own bar.
         TextButton {
-            visible: Book.ready
+            visible: Book.ready && Book.kind === Book.Images
             label: ["FIT", "WIDTH", "HEIGHT", "1:1"][Book.fitMode]
             tip: qsTr("How the page is sized — tap to cycle (F)")
             onClicked: Book.fitMode = (Book.fitMode + 1) % 4
         }
         TextButton {
-            visible: Book.ready
+            visible: Book.ready && Book.kind === Book.Images
             label: Book.rightToLeft ? "R←L" : "L→R"
             checked: Book.rightToLeft
             tip: qsTr("Reading direction — tap for manga order (D)")

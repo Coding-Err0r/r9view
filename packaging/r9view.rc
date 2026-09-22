@@ -1,0 +1,5 @@
+/* Embeds the application manifest. Without a manifest the process is limited to
+   MAX_PATH, which breaks opening media in deeply nested folders. */
+#define RT_MANIFEST_ID 1
+#define RT_MANIFEST_TYPE 24
+RT_MANIFEST_ID RT_MANIFEST_TYPE "r9view.manifest"

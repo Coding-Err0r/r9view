@@ -40,6 +40,7 @@ public:
             mpv_render_context_set_update_callback(m_context, nullptr, nullptr);
             mpv_render_context_free(m_context);
             m_context = nullptr;
+            announce(false);
         }
     }
 
@@ -62,9 +63,10 @@ public:
             return;
 
         mpv_opengl_fbo target{ int(fbo->handle()), fbo->width(), fbo->height(), 0 };
-        // Qt's framebuffers are bottom-up as far as GL is concerned, so mpv is
-        // asked to flip rather than the item being mirrored afterwards.
-        int flip = 1;
+        // No flip. QQuickFramebufferObject already accounts for GL's bottom-left
+        // origin when it composites the texture, so asking mpv to flip as well
+        // turns the picture upside down -- subtitles and all.
+        int flip = 0;
         mpv_render_param params[] = {
             { MPV_RENDER_PARAM_OPENGL_FBO, &target },
             { MPV_RENDER_PARAM_FLIP_Y, &flip },
@@ -118,7 +120,20 @@ private:
             emit surface->frameReady();
         }, m_surface);
 
+        announce(true);
         return true;
+    }
+
+    // Tell the player, on its own thread, that there is now somewhere to draw.
+    // Anything it was asked to open while waiting starts playing at this point.
+    static void announce(bool ready)
+    {
+        Player *player = Player::instance();
+        if (!player)
+            return;
+        QMetaObject::invokeMethod(player, [player, ready] {
+            player->notifyRenderContext(ready);
+        }, Qt::QueuedConnection);
     }
 
     VideoSurface *m_surface = nullptr;

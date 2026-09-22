@@ -11,8 +11,9 @@
 #include <QQuickStyle>
 #include <QTextStream>
 
-#ifdef R9VIEW_VIDEO
 #include "playlist.h"
+
+#ifdef R9VIEW_VIDEO
 #include <QQuickWindow>
 #endif
 
@@ -108,7 +109,6 @@ int main(int argc, char *argv[])
         QString error;
         QTextStream out(stdout);
 
-#ifdef R9VIEW_VIDEO
         // Video first, because it is the reading that can be checked least
         // easily by eye: --list is the quickest way to see which subtitle a
         // nested Subs/ folder actually matched to which episode.
@@ -126,7 +126,6 @@ int main(int argc, char *argv[])
                 out << "\tfonts\t" << dir << "\n";
             return 0;
         }
-#endif
 
         const auto source = PageSource::open(targets.first(), &start, &error);
         if (!source) {

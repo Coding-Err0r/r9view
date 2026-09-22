@@ -58,14 +58,17 @@ qt_add_executable(r9view
     src/pageprovider.h
     src/source.cpp
     src/source.h
+    # Playlist only enumerates and matches -- no mpv, no decoding -- so it is
+    # always built. It keeps --list useful for checking subtitle matching even
+    # on a machine with no libmpv at all.
+    src/playlist.cpp
+    src/playlist.h
 )
 
 if(R9VIEW_VIDEO)
     target_sources(r9view PRIVATE
         src/player.cpp
         src/player.h
-        src/playlist.cpp
-        src/playlist.h
         src/videosurface.cpp
         src/videosurface.h
     )
@@ -75,6 +78,14 @@ endif()
 # to add it here as well -- forgetting only shows up at runtime, as "X is not a
 # type", which is a poor way to find out.
 file(GLOB R9VIEW_QML RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS qml/*.qml)
+
+# The player's interface refers to types that only exist when libmpv does, so
+# without video those files are left out of the module entirely rather than
+# failing to resolve at runtime. Book never reports a video in that case, so
+# nothing ever asks for them.
+if(NOT R9VIEW_VIDEO)
+    list(FILTER R9VIEW_QML EXCLUDE REGEX "qml/(Video|Tracks|Speed)[A-Za-z]*\\.qml$")
+endif()
 
 file(GLOB R9VIEW_ICONS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/icons/*.svg)
 
@@ -110,10 +121,21 @@ if(R9VIEW_VIDEO)
     target_link_libraries(r9view PRIVATE Qt6::OpenGL ${MPV_LIBRARY})
 endif()
 
-# A release build on Windows should not flash up a console window. Debug builds
-# keep theirs, because that is where R9VIEW_DEBUG's output goes.
-if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    set_target_properties(r9view PROPERTIES WIN32_EXECUTABLE TRUE)
+if(WIN32)
+    # The manifest is not optional. Without it the process is held to MAX_PATH
+    # and libmpv reports "Invalid argument" for any file more than 260
+    # characters deep, which is easy to reach inside a season folder. It also
+    # asks for UTF-8 as the process code page, so release names that are not
+    # ASCII survive the trip to libmpv.
+    enable_language(RC)
+    set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -I${CMAKE_CURRENT_SOURCE_DIR}/packaging")
+    target_sources(r9view PRIVATE packaging/r9view.rc)
+
+    # A release build should not flash up a console window. Debug builds keep
+    # theirs, because that is where R9VIEW_DEBUG's output goes.
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        set_target_properties(r9view PROPERTIES WIN32_EXECUTABLE TRUE)
+    endif()
 endif()
 
 # Desktop entries, icon themes and AppStream metadata are all freedesktop
