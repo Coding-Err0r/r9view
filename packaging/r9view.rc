@@ -1,5 +1,9 @@
-/* Embeds the application manifest. Without a manifest the process is limited to
+/* Embeds the application manifest and the icon.
+   The manifest is not cosmetic: without longPathAware the process is limited to
    MAX_PATH, which breaks opening media in deeply nested folders. */
 #define RT_MANIFEST_ID 1
 #define RT_MANIFEST_TYPE 24
 RT_MANIFEST_ID RT_MANIFEST_TYPE "r9view.manifest"
+
+/* Icon id 1 so that "r9view.exe,0" in the shell registration resolves. */
+1 ICON "r9view.ico"
